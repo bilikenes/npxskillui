@@ -7,7 +7,9 @@ import { runUrlMode } from './modes/url.js';
 import { runUltraMode } from './modes/ultra.js';
 import { generateDesignMd } from './writers/design-md.js';
 import { generateSkill } from './writers/skill.js';
-import { CLIOptions, DesignProfile } from './types.js';
+import { generateCodexSkill } from './writers/codex-skill.js';
+import { codexUserSkillsDirectory, installCodexSkill } from './installers/codex.js';
+import { AgentTarget, CLIOptions, DesignProfile } from './types.js';
 import {
   VERSION,
   showLogo,
@@ -36,6 +38,10 @@ program
   .option('--format <format>', 'Output format: design-md | skill | both', 'both')
   .option('--mode <mode>', 'Extraction mode: default | ultra', 'default')
   .option('--screens <number>', 'Ultra mode: max pages to crawl (default: 5)', '5')
+  .option('--target <target>', 'Output target: claude | codex | both', 'claude')
+  .option('--install-to <projectPath>', 'Install the Codex skill into <projectPath>/.agents/skills/')
+  .option('--install-user', 'Install the Codex skill into the current user .agents/skills directory')
+  .option('--force', 'Replace an existing Codex skill during installation')
   .action(async (opts: CLIOptions) => {
     // Always show the logo on every command
     await showLogo();
@@ -51,18 +57,30 @@ program
       opts.repo = answers.source === 'repo' ? answers.target : undefined;
       opts.mode = answers.mode;
       opts.out  = answers.out || './';
+      opts.target = answers.targetAgent;
+      opts.installTo = answers.installTo;
     } else if (modes.length > 1) {
       console.error('  Error: Specify only one of --dir, --repo, or --url\n');
       process.exit(1);
     }
 
     // ── Determine target label for brief ──────────────────────────────
+    if (!isAgentTarget(opts.target)) failCli('Invalid --target value. Use: claude, codex, or both.');
+    if (opts.mode !== 'default' && opts.mode !== 'ultra') failCli('Invalid --mode value. Use: default or ultra.');
+    if (!['design-md', 'skill', 'both'].includes(opts.format)) failCli('Invalid --format value. Use: design-md, skill, or both.');
+    if (opts.installTo && opts.installUser) failCli('Use either --install-to or --install-user, not both.');
+    if ((opts.installTo || opts.installUser || opts.force) && opts.target === 'claude') {
+      failCli('Codex installation options require --target codex or --target both.');
+    }
+
     const target = opts.url || opts.dir || opts.repo || '';
     showMissionBrief(opts.mode || 'default', target, path.resolve(opts.out));
 
     try {
       let profile: DesignProfile;
       let screenshotPath: string | null = null;
+      let extractionDir: string | undefined;
+      let temporaryExtractionDir: string | undefined;
 
       const outputDir = path.resolve(opts.out);
       fs.mkdirSync(outputDir, { recursive: true });
@@ -98,13 +116,16 @@ program
       } else {
         const safeName = (opts.name || new URL(opts.url!).hostname.replace(/^www\./, '').split('.')[0])
           .replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
-        const skillDir = path.join(outputDir, `${safeName}-design`);
-        fs.mkdirSync(path.join(skillDir, 'screenshots'), { recursive: true });
+        extractionDir = opts.target === 'codex'
+          ? fs.mkdtempSync(path.join(outputDir, `.skillui-${safeName}-`))
+          : path.join(outputDir, `${safeName}-design`);
+        if (opts.target === 'codex') temporaryExtractionDir = extractionDir;
+        fs.mkdirSync(path.join(extractionDir, 'screenshots'), { recursive: true });
 
         const sp1 = startSpinner('Fetching HTML + CSS...');
         let urlResult: Awaited<ReturnType<typeof runUrlMode>>;
         try {
-          urlResult = await runUrlMode(opts.url!, opts.name, skillDir);
+          urlResult = await runUrlMode(opts.url!, opts.name, extractionDir);
           const { cssColorCount, cssFontCount, computedColorCount, hadPlaywright } = urlResult;
           const detail = hadPlaywright
             ? `${cssColorCount} CSS colors · ${computedColorCount} computed · ${cssFontCount} fonts`
@@ -128,9 +149,7 @@ program
 
       if (isUltra) {
         const ultraScreens = Math.max(1, Math.min(20, parseInt(opts.screens, 10) || 5));
-        const safeName = (opts.name || new URL(opts.url!).hostname.replace(/^www\./, '').split('.')[0])
-          .replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
-        const skillDir = path.join(path.resolve(opts.out), `${safeName}-design`);
+        const skillDir = extractionDir || path.join(outputDir, `${profile.projectName.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}-design`);
 
         // Check playwright before spinning up ultra
         const { loadPlaywright } = await import('./playwright-loader.js');
@@ -154,13 +173,14 @@ program
       }
 
       // ── Generate + write outputs ───────────────────────────────────
-      const shouldWriteDesignMd = opts.format === 'design-md' || opts.format === 'both';
-      const shouldWriteSkill = opts.skill !== false && (opts.format === 'skill' || opts.format === 'both');
+      const shouldWriteClaude = opts.target === 'claude' || opts.target === 'both';
+      const shouldWriteDesignMd = shouldWriteClaude && (opts.format === 'design-md' || opts.format === 'both');
+      const shouldWriteSkill = shouldWriteClaude && opts.skill !== false && (opts.format === 'skill' || opts.format === 'both');
 
       const designMdContent = generateDesignMd(profile, screenshotPath);
       const safeName = profile.projectName.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
-      const designDir = path.join(path.resolve(opts.out), `${safeName}-design`);
-      fs.mkdirSync(designDir, { recursive: true });
+      const designDir = path.join(outputDir, `${safeName}-design`);
+      if (shouldWriteClaude) fs.mkdirSync(designDir, { recursive: true });
 
       let designMdPath: string | undefined;
       if (shouldWriteDesignMd) {
@@ -191,6 +211,38 @@ program
       }
 
       // ── Show results panel ─────────────────────────────────────────
+      let codexSkillDir: string | undefined;
+      let codexInstallPath: string | undefined;
+      let codexSkillName: string | undefined;
+      if (opts.target === 'codex' || opts.target === 'both') {
+        const spCodex = startSpinner('Creating native Codex skill...');
+        try {
+          const source = opts.url
+            ? { type: 'url' as const, value: opts.url, mode: opts.mode }
+            : opts.repo
+              ? { type: 'repository' as const, value: opts.repo, mode: opts.mode }
+              : { type: 'local-directory' as const, mode: opts.mode };
+          const result = await generateCodexSkill(profile, outputDir, source, extractionDir);
+          codexSkillDir = result.skillDir;
+          codexSkillName = result.skillName;
+          succeedSpinner(spCodex, 'Codex skill', codexSkillDir);
+
+          if (opts.installTo) {
+            codexInstallPath = installCodexSkill(codexSkillDir, opts.installTo, result.skillName, !!opts.force);
+          } else if (opts.installUser) {
+            const userSkills = codexUserSkillsDirectory();
+            if (!userSkills) throw new Error('Unable to determine the current user skill directory.');
+            fs.mkdirSync(userSkills, { recursive: true });
+            codexInstallPath = installCodexSkill(codexSkillDir, path.dirname(path.dirname(userSkills)), result.skillName, !!opts.force);
+          }
+        } catch (e: any) {
+          failSpinner(spCodex, 'Codex skill', e.message);
+          throw e;
+        }
+      }
+
+      if (temporaryExtractionDir) fs.rmSync(temporaryExtractionDir, { recursive: true, force: true });
+
       showResults({
         profile,
         animations: ultraAnimations ?? undefined,
@@ -198,6 +250,10 @@ program
         designMdPath,
         projectName: safeName,
         skillInstalled,
+        target: opts.target,
+        codexSkillDir,
+        codexInstallPath,
+        codexSkillName,
       });
 
     } catch (err: any) {
@@ -207,6 +263,15 @@ program
   });
 
 program.parse();
+
+function isAgentTarget(value: string): value is AgentTarget {
+  return value === 'claude' || value === 'codex' || value === 'both';
+}
+
+function failCli(message: string): never {
+  console.error(`\n  Error: ${message}\n`);
+  process.exit(1);
+}
 
 // ── Write CLAUDE.md into the design folder so Claude Code picks it up ────
 function writeClaludeMd(skillDir: string, safeName: string, projectName: string): void {

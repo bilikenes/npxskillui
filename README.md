@@ -157,7 +157,61 @@ skillui --repo <url>          Clone and scan a git repository
 --name <string>               Override the project name
 --format design-md|skill|both Output format (default: both)
 --no-skill                    Output DESIGN.md only, skip .skill packaging
+--target claude|codex|both     Output target (default: claude)
+--install-to <projectPath>     Install the complete Codex skill into a project
+--install-user                 Install the complete Codex skill for the current user
+--force                        Replace an existing Codex skill during installation
 ```
+
+---
+
+## Using SkillUI with Codex
+
+SkillUI can package an extracted design system as a native, progressive-disclosure Codex skill. It keeps the source site's visual language—typography, spacing, colors, surfaces, components, responsive behavior, interactions, and motion—while instructing Codex to preserve the target application's content and functionality.
+
+### Extract a live site's design
+
+```bash
+skillui --url https://linear.app --mode ultra --target codex
+```
+
+This creates a portable folder such as `linear-codex-skill/`. Copy or move it unchanged into `<project>/.agents/skills/linear-design/`.
+
+### Install directly into another project
+
+```bash
+skillui \
+  --url https://linear.app \
+  --mode ultra \
+  --target codex \
+  --install-to ../my-dashboard
+```
+
+The complete skill is installed at `../my-dashboard/.agents/skills/linear-design/`. Existing skills are protected; pass `--force` only when you intend to replace an existing generated skill. SkillUI never changes the target project's `AGENTS.md`.
+
+### Start Codex
+
+```bash
+cd ../my-dashboard
+codex
+```
+
+Then prompt Codex:
+
+```text
+Use $linear-design to refactor the current frontend so it follows the extracted Linear design language.
+
+Preserve existing functionality, routes, content, data flow, business logic and API behavior.
+Change the visual system: typography, spacing, colors, surfaces, component styling, layout treatment, interaction states and motion.
+```
+
+### Targets and installation
+
+- `--target claude` keeps the existing Claude output and is the default.
+- `--target codex` creates only the portable Codex artifact.
+- `--target both` creates independent Claude and Codex artifacts.
+- `--install-to <projectPath>` installs the Codex artifact into that project's `.agents/skills/` directory.
+- `--install-user` installs the Codex artifact in the current user's `.agents/skills/` directory. It cannot be combined with `--install-to`.
 
 ---
 

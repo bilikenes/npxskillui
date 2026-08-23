@@ -248,6 +248,8 @@ export interface MotionTokens {
 
 // ── CLI Options ──────────────────────────────────────────────────────
 
+export type AgentTarget = 'claude' | 'codex' | 'both';
+
 export interface CLIOptions {
   dir?: string;
   repo?: string;
@@ -258,4 +260,8 @@ export interface CLIOptions {
   format: 'design-md' | 'skill' | 'both';
   mode: 'default' | 'ultra';
   screens: string;
+  target: AgentTarget;
+  installTo?: string;
+  installUser?: boolean;
+  force?: boolean;
 }

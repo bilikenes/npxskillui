@@ -5,7 +5,7 @@ import gradient from 'gradient-string';
 import stripAnsi from 'strip-ansi';
 import { SingleBar, Presets } from 'cli-progress';
 import * as path from 'path';
-import type { DesignProfile } from './types';
+import type { AgentTarget, DesignProfile } from './types';
 import type { FullAnimationResult } from './types-ultra';
 
 export const VERSION = '1.3.4';
@@ -290,10 +290,14 @@ interface ResultsData {
   designMdPath?: string;
   projectName: string;
   skillInstalled?: boolean;
+  target: 'claude' | 'codex' | 'both';
+  codexSkillDir?: string;
+  codexInstallPath?: string;
+  codexSkillName?: string;
 }
 
 export function showResults(data: ResultsData): void {
-  const { profile, animations, skillFilePath, designMdPath, projectName, skillInstalled } = data;
+  const { profile, animations, skillFilePath, designMdPath, projectName, skillInstalled, target, codexSkillDir, codexInstallPath, codexSkillName } = data;
   const fontCount = new Set(profile.typography.map(t => t.fontFamily)).size;
   const framework = profile.frameworks.map(f => f.name).join(', ') || 'none detected';
   const darkMode = profile.designTraits.hasDarkMode ? 'detected' : 'not detected';
@@ -340,6 +344,8 @@ export function showResults(data: ResultsData): void {
   const outputRows: string[] = [];
   if (designMdPath)  outputRows.push('  ' + G(padAnsi('DESIGN.md', 18))      + chalk.dim(rel(designMdPath)));
   if (skillFilePath) outputRows.push('  ' + G(padAnsi(projectName + '.skill', 18)) + chalk.dim(rel(skillFilePath)));
+  if (codexSkillDir) outputRows.push('  ' + G(padAnsi('Codex skill', 18)) + chalk.dim(rel(codexSkillDir)));
+  if (codexInstallPath) outputRows.push('  ' + G(padAnsi('Installed to', 18)) + chalk.dim(codexInstallPath));
 
   if (outputRows.length > 0) {
     console.log(boxen(outputRows.join('\n'), {
@@ -353,13 +359,27 @@ export function showResults(data: ResultsData): void {
   }
 
   // Next steps box
-  const nextSteps = [
+  const claudeSteps = [
     chalk.dim('  Open Claude Code inside the design folder:'),
     '    ' + chalk.hex('#38bdf8')('cd ' + projectName + '-design && claude'),
     '',
     chalk.dim('  Claude will auto-read CLAUDE.md and SKILL.md. Then ask:'),
     '    ' + chalk.dim('"Build me a UI that matches this design system"'),
-  ].join('\n');
+  ];
+  const codexSteps = codexInstallPath
+    ? [
+        chalk.dim('  Design source and target application are separate.'),
+        chalk.dim('  Start Codex in the target project, then prompt:'),
+        '    ' + chalk.hex('#38bdf8')(`Use $${codexSkillName} to redesign the existing frontend while preserving functionality and content.`),
+      ]
+    : [
+        chalk.dim('  To use this Codex skill in a project, copy or move it to:'),
+        '    ' + chalk.hex('#38bdf8')(`<project>/.agents/skills/${codexSkillName}`),
+        '',
+        chalk.dim('  Then start Codex in that project and prompt:'),
+        '    ' + chalk.hex('#38bdf8')(`Use $${codexSkillName} to adapt the existing frontend while preserving functionality.`),
+      ];
+  const nextSteps = (target === 'claude' ? claudeSteps : target === 'codex' ? codexSteps : [...claudeSteps, '', ...codexSteps]).join('\n');
 
   console.log(boxen(nextSteps, {
     title: chalk.bold(' Next steps '),
@@ -378,6 +398,8 @@ export interface InteractiveAnswers {
   target: string;
   mode: 'default' | 'ultra';
   out: string;
+  targetAgent: AgentTarget;
+  installTo?: string;
 }
 
 export async function runInteractivePrompts(): Promise<InteractiveAnswers | null> {
@@ -411,6 +433,27 @@ export async function runInteractivePrompts(): Promise<InteractiveAnswers | null
           { title: chalk.white('Default') + chalk.dim('  --  fast, CSS + tokens, no Playwright needed'), value: 'default' },
           { title: chalk.hex('#a78bfa')('Ultra') + chalk.dim('    --  cinematic, scroll frames, requires Playwright'), value: 'ultra' },
         ],
+      },
+      {
+        type: 'select',
+        name: 'targetAgent',
+        message: chalk.white('Output target?'),
+        choices: [
+          { title: chalk.white('Claude Code') + chalk.dim('  --  existing .skill package'), value: 'claude' },
+          { title: chalk.hex('#10a37f')('Codex') + chalk.dim('        --  native .agents/skills folder'), value: 'codex' },
+          { title: chalk.hex('#a78bfa')('Both') + chalk.dim('         --  generate independent Claude and Codex artifacts'), value: 'both' },
+        ],
+      },
+      {
+        type: (prev: AgentTarget) => prev === 'claude' ? null : 'confirm',
+        name: 'installProject',
+        message: chalk.white('Install the Codex skill into an existing project?'),
+        initial: false,
+      },
+      {
+        type: (_prev: boolean, values: { installProject?: boolean }) => values.installProject ? 'text' : null,
+        name: 'installTo',
+        message: chalk.white('Target project path:'),
       },
       {
         type: 'text',
