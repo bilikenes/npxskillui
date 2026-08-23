@@ -5,8 +5,6 @@
   <br /><br />
   <p><strong>Reverse-engineer any design system into a native Codex skill.<br/>Deterministic extraction. No AI inference. No LLM API calls.</strong></p>
 
-  [![npm version](https://img.shields.io/npm/v/skillui?color=%23e8735a&label=skillui&style=flat-square)](https://www.npmjs.com/package/skillui)
-  [![npm downloads](https://img.shields.io/npm/dm/skillui?color=%23e8735a&style=flat-square)](https://www.npmjs.com/package/skillui)
   [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](https://nodejs.org)
   [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/bilikenes/npxskillui)
   [![GitHub repo](https://img.shields.io/badge/source-npxskillui-gray?style=flat-square&logo=github)](https://github.com/bilikenes/npxskillui)
@@ -23,18 +21,25 @@ It extracts colors, typography, spacing, CSS variables, components, responsive r
 
 SkillUI does not copy a source site's business logic or content. The generated skill tells Codex how to carry over the visual language while preserving the target application's routes, data, behavior, and functionality.
 
-## Installation
+> **Distribution note:** This Codex-compatible version is currently available in this GitHub repository. It has not yet been published as the general `skillui` npm package, so install it from source using the steps below.
+
+## Installation from GitHub
 
 ```bash
-npm install -g skillui
+git clone https://github.com/bilikenes/npxskillui.git
+cd npxskillui
+npm install
+npm run build
+npm link
 ```
+
+`npm link` makes the locally built CLI available as the `skillui` command. If you do not want to link it globally, use `node dist/cli.js` instead.
 
 Requires **Node.js 18 or newer**.
 
 For the optional `ultra` mode, install Playwright and its Chromium browser:
 
 ```bash
-npm install -g playwright
 npx playwright install chromium
 ```
 
@@ -257,23 +262,20 @@ No LLM is used to interpret the source. Network access is required for live URLs
 - Playwright and Chromium, when using the full `--mode ultra` browser extraction
 - Network access, when analyzing a URL, cloning a repository, or downloading remote assets/fonts
 
-## Developing from source
+## Running without `npm link`
 
 ```bash
-git clone https://github.com/bilikenes/npxskillui.git
-cd npxskillui
-npm install
-npm run build
 node dist/cli.js --url https://linear.app --target codex --out ./design-systems
 ```
 
-The package entry point is `dist/cli.js`; `npm run build` bundles the CLI into that file.
+The package entry point is `dist/cli.js`; run `npm run build` again after changing the source code.
 
 ## Package information
 
 | | |
 |---|---|
-| **Package** | [npmjs.com/package/skillui](https://www.npmjs.com/package/skillui) |
+| **Distribution** | GitHub repository; npm publication is not available yet |
+| **Local package name** | `skillui` |
 | **Version** | Managed in [`package.json`](package.json) |
 | **License** | MIT |
 | **Source** | [github.com/bilikenes/npxskillui](https://github.com/bilikenes/npxskillui) |
